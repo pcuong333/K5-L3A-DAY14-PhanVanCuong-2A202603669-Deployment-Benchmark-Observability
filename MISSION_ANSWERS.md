@@ -141,6 +141,42 @@ Client (HTTP :80 / HTTPS :443)
 
 ---
 
+## Part 3: Cloud Deployment
+
+### Exercise 3.1: Deploy Agent Part 6 (`06-lab-complete/`) lên Railway
+
+- **Public URL:** `https://zucchini-simplicity-production-7b7c1dfb.up.railway.app`
+- **Cấu hình trên Railway:**
+  - Service Agent trỏ tới repo GitHub với **Root Directory = `06-lab-complete`** (dùng `Dockerfile` và `railway.toml`).
+  - Tạo thêm **Redis** database trên Railway và gán biến `REDIS_URL=${{Redis.REDIS_URL}}`, `AGENT_API_KEY` (secret trên dashboard), `ENVIRONMENT=production`, `RATE_LIMIT_PER_MINUTE=10`, `DAILY_BUDGET_USD=1.0`.
+- **Kết quả tự kiểm tra 4 lệnh CP6:**
+  - `GET /health` → `200` (`{"status":"ok","environment":"production"}`)
+  - `GET /ready` → `200` (`{"ready":true}`)
+  - `POST /ask` (không có `X-API-Key`) → `401`
+  - `POST /ask` (có `X-API-Key`) → `200` (`{"question":"Hello","answer":"Agent đang hoạt động tốt! (mock response) Hỏi thêm câu hỏi đi nhé."}`)
+- **Screenshots:** [dashboard.png](screenshots/dashboard.png), [running.png](screenshots/running.png), [test.png](screenshots/test.png) (chi tiết trong [DEPLOYMENT.md](DEPLOYMENT.md)).
+
+### So sánh `railway.toml` vs `render.yaml`
+
+| Tiêu chí | `railway.toml` | `render.yaml` (Blueprint) |
+|---|---|---|
+| **Định dạng** | TOML (`[build]`, `[deploy]`) | YAML (`services:`, `envVars:`) |
+| **Cách build** | `builder = "DOCKERFILE"` | `type: web`, `runtime: docker` |
+| **Health check** | `healthcheckPath = "/health"`, `healthcheckTimeout = 30` | `healthCheckPath: /health` |
+| **Quản lý env/secret** | Biến môi trường & reference Redis (`${{Redis.REDIS_URL}}`) cấu hình trên Dashboard/CLI | Khai báo trực tiếp trong `envVars` (`generateValue: true` tự sinh secret hoặc `sync: false` nhập trên Dashboard) |
+| **Restart policy** | `restartPolicyType = "ON_FAILURE"`, `restartPolicyMaxRetries = 5` | Render tự quản lý health check & auto-restart khi container lỗi |
+
+### Exercise 3.3: Pipeline Google Cloud Run (`03-cloud-deployment/production-cloud-run/`)
+
+- **`cloudbuild.yaml`** định nghĩa pipeline CI/CD 4 bước tuần tự (`waitFor`) trên Cloud Build:
+  1. **Step 1 (`test`):** Dùng `python:3.11-slim` cài dependencies và chạy `pytest tests/ -v --tb=short`; chỉ tiếp tục nếu toàn bộ test pass.
+  2. **Step 2 (`build`):** Build Docker image gắn tag `$COMMIT_SHA` và `latest` (tận dụng `--cache-from` layer cache).
+  3. **Step 3 (`push`):** Push cả hai tag lên Google Container Registry (`gcr.io/$PROJECT_ID/ai-agent`).
+  4. **Step 4 (`deploy`):** Chạy `gcloud run deploy ai-agent` lên region `asia-southeast1` với `--min-instances=1` (tránh cold start), `--max-instances=10`, `512Mi` RAM, 1 CPU và lấy secret `OPENAI_API_KEY` từ Secret Manager (`--set-secrets`).
+- **`service.yaml`** là file Infrastructure-as-Code (Knative Serving) khai báo chi tiết cấu hình runtime của Cloud Run: autoscale `1–10` instances (concurrency `80` req/instance), `livenessProbe` (`/health`), `startupProbe` (`/ready`) và inject secret qua `secretKeyRef`.
+
+---
+
 ## Part 4: API Security
 
 ### Exercise 4.1: API Key Authentication (`04-api-gateway/develop/`)
@@ -363,4 +399,8 @@ Kết quả chạy `python check_production_ready.py` (chế độ đầy đủ,
   * **Hỏi gì:** Nhờ hỗ trợ hoàn thiện các file TODO trong `06-lab-complete/` (`app/main.py`, `config.py`, `auth.py`, `redis_client.py`, `rate_limiter.py`, `cost_guard.py`, `Dockerfile`, `docker-compose.yml`, `.dockerignore`, `.env.example`, `railway.toml`, `render.yaml`) và chạy `check_production_ready.py`.
   * **Nhận gì:** Lần 1 đạt `10/12` (lỗi `pip install --user` khi chạy non-root trong container), sửa `Dockerfile` sang `/opt/venv` và chạy lại đạt `PASS 12/12` (`43/43 checks passed`, image `368 MB`, `docker stop` `0.8s`).
   * **Tự sửa & tự kiểm tra:** Đã kiểm tra toàn bộ 12 tiêu chí và dán phần Checklist Deliverable vào `MISSION_ANSWERS.md`, không chỉnh sửa `check_production_ready.py`.
+* **Part 3 (CP6):**
+  * **Hỏi gì:** Nhờ hướng dẫn deploy `06-lab-complete/` lên Railway kèm Redis, chạy kiểm tra 4 endpoint public và hoàn thiện `DEPLOYMENT.md` + Part 3 (bao gồm so sánh `railway.toml`/`render.yaml` và Exercise 3.3 Cloud Run).
+  * **Nhận gì:** Deploy lên `https://zucchini-simplicity-production-7b7c1dfb.up.railway.app`, kiểm tra `/health` (`200`), `/ready` (`200`), `/ask` không key (`401`), `/ask` có key (`200`), đọc `03-cloud-deployment/production-cloud-run/cloudbuild.yaml` & `service.yaml` để tổng hợp vào `MISSION_ANSWERS.md` và `DEPLOYMENT.md`.
+  * **Tự sửa & tự kiểm tra:** Tự thao tác cấu hình service, Redis và biến môi trường trên Railway Dashboard, tự test lại 4 lệnh `curl` và chụp 3 ảnh lưu vào `screenshots/`.
 
